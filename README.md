@@ -1,7 +1,5 @@
 # SevaIITP - NSS IIT Patna Donation Platform
 
-![SevaIITP Logo](public/images/logo.png)
-
 ## Overview
 
 SevaIITP is a comprehensive donation management platform developed for the National Service Scheme (NSS) at IIT Patna. The platform facilitates various types of donations including blood donation camps, blood requests, fundraising campaigns, and item donations. It provides a user-friendly interface for both donors and administrators to manage and participate in donation activities.
