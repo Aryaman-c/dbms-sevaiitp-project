@@ -1,0 +1,874 @@
+// script.js
+// Dynamically loads data from donation_db via REST APIs and manages UI interactions
+
+// Helper function to make authenticated API requests
+async function fetchWithAuth(url, options = {}) {
+    const userId = localStorage.getItem('userId');
+    if (!userId) {
+        console.log('No user ID found, redirecting to login');
+        window.location.href = 'login.html';
+        return;
+    }
+
+    // Check if session is expired (24 hours)
+    const loginTime = localStorage.getItem('loginTime');
+    if (loginTime) {
+        const loginDate = new Date(loginTime);
+        const now = new Date();
+        const hoursDiff = (now - loginDate) / (1000 * 60 * 60);
+        
+        if (hoursDiff > 24) {
+            console.log('Session expired, redirecting to login');
+            localStorage.clear();
+            window.location.href = 'login.html';
+            return;
+        }
+    }
+
+    const headers = {
+        'Content-Type': 'application/json',
+        'x-user-id': userId,
+        ...options.headers
+    };
+
+    try {
+        const response = await fetch(url, { ...options, headers });
+        if (response.status === 401) {
+            console.log('Authentication failed, redirecting to login');
+            localStorage.clear();
+            window.location.href = 'login.html';
+            return;
+        }
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Request failed');
+        }
+        return await response.json();
+    } catch (error) {
+        console.error('API Error:', error);
+        throw error;
+    }
+}
+
+// Check if user is logged in
+function checkAuth() {
+    const userId = localStorage.getItem('userId');
+    if (!userId) {
+        console.log('No user ID found, redirecting to login');
+        window.location.href = 'login.html';
+        return;
+    }
+
+    // Check if session is expired (24 hours)
+    const loginTime = localStorage.getItem('loginTime');
+    if (loginTime) {
+        const loginDate = new Date(loginTime);
+        const now = new Date();
+        const hoursDiff = (now - loginDate) / (1000 * 60 * 60);
+        
+        if (hoursDiff > 24) {
+            console.log('Session expired, redirecting to login');
+            localStorage.clear();
+            window.location.href = 'login.html';
+            return;
+        }
+    }
+
+    // Update user info in the UI
+    const username = localStorage.getItem('username');
+    const fullName = localStorage.getItem('fullName');
+    const userInfoElement = document.getElementById('userInfo');
+    
+    if (userInfoElement) {
+        userInfoElement.textContent = `Welcome, ${fullName || username || 'User'}`;
+    }
+}
+
+// Handle logout
+function handleLogout() {
+    localStorage.clear();
+    window.location.href = 'login.html';
+}
+
+// Redirect logic 
+document.addEventListener('DOMContentLoaded', () => {
+    const userId = localStorage.getItem('userId');
+    if (!userId) {
+        if (!window.location.pathname.includes('login.html')) {
+            window.location.href = 'login.html';
+        }
+        return;
+    }
+    const loginTime = localStorage.getItem('loginTime');
+    if (loginTime) {
+        const loginDate = new Date(loginTime);
+        const now = new Date();
+        if ((now - loginDate) / (1000 * 60 * 60) > 24) {
+            localStorage.clear();
+            window.location.href = 'login.html';
+            return;
+        }
+    }
+    if (window.location.pathname.includes('login.html')) {
+        window.location.href = 'app.html';
+    }
+});
+
+// Initialize page
+document.addEventListener('DOMContentLoaded', () => {
+    checkAuth();
+    
+    // Restore the last active section or default to fundraising
+    const currentSection = localStorage.getItem('currentSection') || 'fundraising';
+    
+    if (currentSection === 'blood-donation') {
+        showBloodDonation();
+    } else if (currentSection === 'fundraising') {
+        showFundraising();
+    } else if (currentSection === 'item-donation') {
+        showItemDonation();
+    } else {
+        showFundraising(); // Default fallback
+    }
+    
+    // Check if user is admin and show admin controls
+    const userRole = localStorage.getItem('role');
+    if (userRole === 'admin') {
+        document.getElementById('adminControls').classList.remove('hidden');
+    }
+});
+
+// Navigation functions
+function showBloodDonation() {
+    document.getElementById('blood-donation').classList.remove('hidden');
+    document.getElementById('fundraising').classList.add('hidden');
+    document.getElementById('item-donation').classList.add('hidden');
+    
+    // Update active button
+    document.querySelectorAll('.nav-button').forEach(btn => btn.classList.remove('active'));
+    document.querySelector('.nav-button[onclick="showBloodDonation()"]').classList.add('active');
+    
+    // Save current section
+    localStorage.setItem('currentSection', 'blood-donation');
+    
+    // Load blood donation data
+    loadBloodCamps();
+    loadBloodRequests();
+}
+
+function showFundraising() {
+    document.getElementById('blood-donation').classList.add('hidden');
+    document.getElementById('fundraising').classList.remove('hidden');
+    document.getElementById('item-donation').classList.add('hidden');
+    
+    // Update active button
+    document.querySelectorAll('.nav-button').forEach(btn => btn.classList.remove('active'));
+    document.querySelector('.nav-button[onclick="showFundraising()"]').classList.add('active');
+    
+    // Save current section
+    localStorage.setItem('currentSection', 'fundraising');
+    
+    // Load fundraising data
+    loadFundraisingCampaigns();
+}
+
+function showItemDonation() {
+    document.getElementById('blood-donation').classList.add('hidden');
+    document.getElementById('fundraising').classList.add('hidden');
+    document.getElementById('item-donation').classList.remove('hidden');
+    
+    // Update active button
+    document.querySelectorAll('.nav-button').forEach(btn => btn.classList.remove('active'));
+    document.querySelector('.nav-button[onclick="showItemDonation()"]').classList.add('active');
+    
+    // Save current section
+    localStorage.setItem('currentSection', 'item-donation');
+    
+    // Load item donation data
+    loadItemDonations();
+}
+
+// Load and display data
+async function loadBloodCamps() {
+    try {
+        const camps = await fetchWithAuth('/api/blood-camps');
+        const container = document.getElementById('blood-camps-list');
+
+        // Show all camps (no date filtering)
+        if (camps.length === 0) {
+            container.innerHTML = '<p class="no-data">No blood donation camps.</p>';
+            return;
+        }
+
+        container.innerHTML = camps.map(camp => `
+            <div class="card">
+              <h3>${camp.title}</h3>
+              <p>${camp.description || ''}</p>
+              <p><strong>📍 Location:</strong> ${camp.location}</p>
+              <p><strong>📅 Date:</strong> ${new Date(camp.date).toLocaleDateString()}</p>
+              <p><strong>⏰ Time:</strong> ${camp.start_time} - ${camp.end_time}</p>
+              <p><strong>ℹ️ Required Blood Groups:</strong> ${camp.required_blood_groups}</p>
+              <div class="action-buttons">
+      <button class="btn-primary" onclick="registerForCamp(${camp.id})">
+        Register to Donate
+      </button>
+    </div>
+            </div>
+          `).join('');          
+    } catch (error) {
+        console.error('Error loading blood camps:', error);
+        showError('Failed to load blood donation camps');
+    }
+}
+
+
+async function loadBloodRequests() {
+    try {
+        const requests = await fetchWithAuth('/api/blood-requests');
+        const container = document.getElementById('blood-requests-list');
+
+        // Show all requests (no date filtering)
+        if (requests.length === 0) {
+            container.innerHTML = '<p class="no-data">No blood requests.</p>';
+            return;
+        }
+
+        container.innerHTML = requests.map(request => `
+            <div class="card ${request.urgency_level === 'urgent' ? 'urgent' : ''}">
+                <h3>${request.required_blood_group} Blood Needed - ${request.urgency_level.toUpperCase()}</h3>
+                <p><strong>👤 Patient:</strong> ${request.patient_name}</p>
+                <p><strong>🏥 Hospital:</strong> ${request.hospital_name}</p>
+                <p><strong>📍 Location:</strong> ${request.hospital_address}</p>
+                <p><strong>🩸 Units Required:</strong> ${request.units_required}</p>
+                <p><strong>📞 Contact:</strong> ${request.contact_person} (${request.contact_number})</p>
+                ${request.additional_notes ? `<p><strong>ℹ️ Notes:</strong> ${request.additional_notes}</p>` : ''}
+                <p><strong>📅 Requested on:</strong> ${new Date(request.request_date).toLocaleDateString()}</p>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading blood requests:', error);
+        showError('Failed to load blood requests');
+    }
+}
+
+
+async function loadFundraisingCampaigns() {
+    try {
+        const campaigns = await fetchWithAuth('/api/fundraising');
+        const container = document.getElementById('fundraising-campaigns');
+
+        // Show all campaigns (no status or date filtering)
+        if (campaigns.length === 0) {
+            container.innerHTML = '<p class="no-data">No fundraising campaigns.</p>';
+            return;
+        }
+
+        container.innerHTML = campaigns.map(campaign => `
+            <div class="card">
+                <h3>${campaign.title}</h3>
+                <p>${campaign.description}</p>
+                <div class="progress-bar">
+                    <div class="progress" style="width: ${(campaign.current_amount / campaign.goal_amount * 100)}%"></div>
+                </div>
+                <p class="amount">
+                    <span>₹${campaign.current_amount.toLocaleString('en-IN')} raised</span>
+                    <span>of ₹${campaign.goal_amount.toLocaleString('en-IN')}</span>
+                </p>
+                <p><strong>🏷️ Category:</strong> ${campaign.category}</p>
+                <p><strong>⏳ Duration:</strong> ${new Date(campaign.start_date).toLocaleDateString()} - ${new Date(campaign.end_date).toLocaleDateString()}</p>
+                ${campaign.image_url ? `<img src="${campaign.image_url}" alt="${campaign.title}">` : ''}
+                <div class="action-buttons">
+                    <button onclick="showDonateModal(${campaign.id})" class="btn-primary">Donate Now</button>
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading fundraising campaigns:', error);
+        showError('Failed to load fundraising campaigns');
+    }
+}
+
+
+async function loadItemDonations() {
+    try {
+        const [campaigns, donations] = await Promise.all([
+            fetchWithAuth('/api/item-campaigns'),
+            fetchWithAuth('/api/item-donations')
+        ]);
+
+        const container = document.getElementById('item-categories');
+        
+        // Calculate total donations for each campaign
+        const campaignTotals = {};
+        donations.forEach(donation => {
+            if (!campaignTotals[donation.campaign_id]) {
+                campaignTotals[donation.campaign_id] = 0;
+            }
+            campaignTotals[donation.campaign_id] += donation.quantity;
+        });
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Normalize
+
+        // Filter out completed or expired campaigns
+        const activeCampaigns = campaigns.filter(campaign => {
+            const totalDonated = campaignTotals[campaign.id] || 0;
+            const endDate = new Date(campaign.end_date);
+            endDate.setHours(0, 0, 0, 0);
+
+            return (
+                totalDonated < (campaign.required_quantity || Infinity) &&
+                campaign.status !== 'completed' &&
+                endDate >= today
+            );
+        });
+
+        if (activeCampaigns.length === 0) {
+            container.innerHTML = '<p class="no-data">No active item donation campaigns.</p>';
+            return;
+        }
+
+        // Group active campaigns by category
+        const categorizedCampaigns = {};
+        activeCampaigns.forEach(campaign => {
+            if (!categorizedCampaigns[campaign.category]) {
+                categorizedCampaigns[campaign.category] = [];
+            }
+
+            // Attach related donations
+            const campaignDonations = donations.filter(d => d.campaign_id === campaign.id);
+            campaign.donations = campaignDonations;
+
+            categorizedCampaigns[campaign.category].push(campaign);
+        });
+
+        container.innerHTML = Object.entries(categorizedCampaigns).map(([category, campaigns]) => `
+            <div class="category-section">
+                <div class="campaigns-grid">
+                    ${campaigns.map(campaign => `
+                        <div class="campaign-card">
+                            <h3>${campaign.title}</h3>
+                            <p>${campaign.description}</p>
+                            <p><strong>📍 Location:</strong> ${campaign.location}</p>
+                            <p><strong>📅 Duration:</strong> ${new Date(campaign.start_date).toLocaleDateString()} - ${new Date(campaign.end_date).toLocaleDateString()}</p>
+                            <button
+                                onclick="showItemDonationModal(${campaign.id})"
+                                class="btn-primary"
+                                style="width: 50%; padding: 0.4rem 0.8rem; font-size: 1rem; display: inline-flex; justify-content: center; align-items: right; gap: 0.3rem;">
+                                Donate Items
+                            </button>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading item donations:', error);
+        showError('Failed to load item donations');
+    }
+}
+
+
+// Error display helper
+function showError(message, type = 'error') {
+    const errorDiv = document.createElement('div');
+    errorDiv.className = type === 'error' ? 'error-message' : 'success-message';
+    errorDiv.textContent = message;
+    document.querySelector('main').prepend(errorDiv);
+    setTimeout(() => errorDiv.remove(), 5000);
+}
+
+// Modal controls
+function showAddBloodEvent() {
+    document.getElementById('addBloodCampModal').classList.remove('hidden');
+}
+
+function showAddBloodRequest() {
+    document.getElementById('addBloodRequestModal').classList.remove('hidden');
+}
+
+function showAddFundraiser() {
+    document.getElementById('addFundraiserModal').classList.remove('hidden');
+}
+
+function showAddItemCampaign() {
+    document.getElementById('addItemCampaignModal').classList.remove('hidden');
+}
+
+function showDonateModal(campaignId) {
+    document.getElementById('donate-campaign-id').value = campaignId;
+    document.getElementById('donateModal').classList.remove('hidden');
+}
+
+function showItemDonationModal(campaignId) {
+    document.getElementById('donate-item-campaign-id').value = campaignId;
+    document.getElementById('donateItemModal').classList.remove('hidden');
+}
+
+function hideModal(id) {
+    document.getElementById(id).classList.add('hidden');
+}
+
+// Form handlers
+async function handleAddBloodCamp(e) {
+    e.preventDefault();
+    try {
+        const formData = {
+            title: document.getElementById('camp-title').value,
+            description: document.getElementById('camp-description').value,
+            location: document.getElementById('camp-location').value,
+            date: document.getElementById('camp-date').value,
+            start_time: document.getElementById('camp-start-time').value,
+            end_time: document.getElementById('camp-end-time').value,
+            required_blood_groups: document.getElementById('camp-blood-groups').value,
+            organizer_id: localStorage.getItem('userId')
+        };
+
+        await fetchWithAuth('/api/blood-camps', {
+        method: 'POST',
+            body: JSON.stringify(formData)
+        });
+
+      hideModal('addBloodCampModal');
+      loadBloodCamps();
+    } catch (error) {
+        console.error('Error adding blood camp:', error);
+        showError('Failed to add blood donation camp');
+    }
+}
+
+  async function handleAddBloodRequest(e) {
+    e.preventDefault();
+    try {
+        const formData = {
+            patient_name: document.getElementById('request-patient').value,
+            hospital_name: document.getElementById('request-hospital').value,
+            hospital_address: document.getElementById('request-location').value,
+            required_blood_group: document.getElementById('request-blood-type').value,
+            units_required: parseInt(document.getElementById('request-units').value),
+            urgency_level: document.getElementById('request-urgency').value,
+            contact_person: document.getElementById('request-contact-person').value,
+            contact_number: document.getElementById('request-contact').value,
+            additional_notes: document.getElementById('request-notes').value,
+          request_date: new Date().toISOString().split('T')[0],
+            created_by: localStorage.getItem('userId')
+        };
+
+        await fetchWithAuth('/api/blood-requests', {
+            method: 'POST',
+            body: JSON.stringify(formData)
+        });
+
+      hideModal('addBloodRequestModal');
+      loadBloodRequests();
+    } catch (error) {
+        console.error('Error adding blood request:', error);
+        showError('Failed to add blood request');
+    }
+}
+
+  async function handleAddFundraiser(e) {
+    e.preventDefault();
+    try {
+        const formData = {
+            title: document.getElementById('fundraiser-title').value,
+            description: document.getElementById('fundraiser-description').value,
+            goal_amount: parseFloat(document.getElementById('fundraiser-target').value),
+            start_date: new Date().toISOString().split('T')[0],
+            end_date: new Date(Date.now() + parseInt(document.getElementById('fundraiser-days').value) * 86400000).toISOString().split('T')[0],
+            category: document.getElementById('fundraiser-category').value,
+            image_url: document.getElementById('fundraiser-image').value || null
+        };
+
+        await fetchWithAuth('/api/fundraising', {
+            method: 'POST',
+            body: JSON.stringify(formData)
+        });
+
+      hideModal('addFundraiserModal');
+      loadFundraisingCampaigns();
+        showError('Fundraiser created successfully', 'success');
+    } catch (error) {
+        console.error('Error adding fundraiser:', error);
+        showError('Failed to create fundraiser');
+    }
+}
+
+async function handleDonation(e) {
+    e.preventDefault();
+    try {
+        const campaignId = document.getElementById('donate-campaign-id').value;
+        const formData = {
+            amount: parseFloat(document.getElementById('donate-amount').value),
+            payment_method: document.getElementById('donate-payment').value,
+            anonymous: document.getElementById('donate-anonymous').checked,
+            message: document.getElementById('donate-message').value || ''
+        };
+
+        await fetchWithAuth(`/api/fundraising/${campaignId}/donate`, {
+            method: 'POST',
+            body: JSON.stringify(formData)
+        });
+
+        hideModal('donateModal');
+        loadFundraisingCampaigns();
+        showError('Thank you for your donation!', 'success');
+    } catch (error) {
+        console.error('Error processing donation:', error);
+        showError('Failed to process donation');
+    }
+}
+
+async function handleAddItemCampaign(e) {
+    e.preventDefault();
+    try {
+        const formData = {
+            title: document.getElementById('item-campaign-title').value,
+            description: document.getElementById('item-campaign-description').value,
+            location: document.getElementById('item-campaign-location').value,
+            start_date: document.getElementById('item-campaign-start').value,
+            end_date: document.getElementById('item-campaign-end').value,
+            category: document.getElementById('item-campaign-category').value
+        };
+
+        await fetchWithAuth('/api/item-campaigns', {
+            method: 'POST',
+            body: JSON.stringify(formData)
+        });
+
+        hideModal('addItemCampaignModal');
+        loadItemDonations();
+        showError('Item donation campaign created successfully', 'success');
+    } catch (error) {
+        console.error('Error adding item campaign:', error);
+        showError('Failed to create item donation campaign');
+    }
+}
+
+async function handleItemDonation(e) {
+    e.preventDefault();
+    try {
+        const campaignId = document.getElementById('donate-item-campaign-id').value;
+        const formData = {
+            campaign_id: campaignId,
+            item_name: document.getElementById('donate-item-name').value,
+            quantity: parseInt(document.getElementById('donate-item-quantity').value),
+            condition: document.getElementById('donate-item-condition').value,
+            description: document.getElementById('donate-item-description').value,
+            collection_address: document.getElementById('donate-item-address').value
+        };
+
+        await fetchWithAuth('/api/item-donations', {
+            method: 'POST',
+            body: JSON.stringify(formData)
+        });
+
+        hideModal('donateItemModal');
+        loadItemDonations();
+        showError('Thank you for your donation!', 'success');
+    } catch (error) {
+        console.error('Error adding item donation:', error);
+        showError('Failed to register item donation');
+    }
+}
+
+// Function to handle donation button click
+function registerForCamp(campId) {
+    alert('Thank you for your interest in donating blood! The organizers will contact you soon with more details.');
+}
+
+// Function to clean up completed campaigns
+async function cleanupCompletedCampaigns() {
+    try {
+        const response = await fetchWithAuth('/api/cleanup-completed-campaigns', {
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        showError(`Cleaned up ${result.fundraisingDeleted} fundraising campaigns and ${result.itemDonationsDeleted} item donation campaigns`, 'success');
+        
+        // Refresh all sections
+        loadFundraisingCampaigns();
+        loadItemDonations();
+    } catch (error) {
+        console.error('Error cleaning up campaigns:', error);
+        showError('Failed to clean up completed campaigns');
+    }
+}
+
+// Update registration form submission
+async function handleRegistration(e) {
+    e.preventDefault();
+    try {
+        const formData = {
+            username: document.getElementById('register-username').value,
+            email: document.getElementById('register-email').value,
+            password: document.getElementById('register-password').value,
+            full_name: document.getElementById('register-fullname').value,
+            phone: document.getElementById('register-phone').value
+        };
+
+        const response = await fetch('/api/register', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(formData)
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Registration failed');
+        }
+
+        const userData = await response.json();
+        showError('Registration successful! Please login.', 'success');
+        hideModal('registerModal');
+        showLoginForm();
+    } catch (error) {
+        console.error('Registration error:', error);
+        showError(error.message || 'Registration failed');
+    }
+  }
+
+// Admin Dashboard Functions
+function showAdminDashboard() {
+    document.getElementById('adminDashboardModal').classList.remove('hidden');
+    loadAdminData();
+}
+
+function showAdminTab(tabName) {
+    // Hide all tab contents
+    document.querySelectorAll('.admin-tab-content').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Deactivate all tabs
+    document.querySelectorAll('.admin-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Show selected tab content
+    document.getElementById(`admin-${tabName}`).classList.add('active');
+    
+    // Activate selected tab
+    document.querySelector(`.admin-tab[onclick="showAdminTab('${tabName}')"]`).classList.add('active');
+    
+    // Load data for the selected tab
+    if (tabName === 'blood-camps') {
+        loadAdminBloodCamps();
+    } else if (tabName === 'blood-requests') {
+        loadAdminBloodRequests();
+    } else if (tabName === 'fundraising') {
+        loadAdminFundraising();
+    } else if (tabName === 'item-donations') {
+        loadAdminItemDonations();
+    }
+}
+
+async function loadAdminData() {
+    // Load data for the active tab
+    const activeTab = document.querySelector('.admin-tab-content.active');
+    if (activeTab) {
+        const tabId = activeTab.id;
+        if (tabId === 'admin-blood-camps') {
+            loadAdminBloodCamps();
+        } else if (tabId === 'admin-blood-requests') {
+            loadAdminBloodRequests();
+        } else if (tabId === 'admin-fundraising') {
+            loadAdminFundraising();
+        } else if (tabId === 'admin-item-donations') {
+            loadAdminItemDonations();
+        }
+    }
+}
+
+async function loadAdminBloodCamps() {
+    try {
+        const camps = await fetchWithAuth('/api/blood-camps');
+        const container = document.getElementById('admin-blood-camps-list');
+        
+        if (camps.length === 0) {
+            container.innerHTML = '<p class="no-data">No blood donation camps found.</p>';
+            return;
+        }
+        
+        container.innerHTML = camps.map(camp => `
+            <div class="admin-item">
+                <h4>${camp.title}</h4>
+                <p><strong>Location:</strong> ${camp.location}</p>
+                <p><strong>Date:</strong> ${new Date(camp.date).toLocaleDateString()}</p>
+                <p><strong>Time:</strong> ${camp.start_time} - ${camp.end_time}</p>
+                <p><strong>Blood Groups:</strong> ${camp.required_blood_groups}</p>
+                <button class="delete-btn" onclick="deleteBloodCamp(${camp.id})">
+                    <i class="fas fa-trash"></i> Delete
+                </button>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading blood camps for admin:', error);
+        showError('Failed to load blood donation camps');
+    }
+}
+
+async function loadAdminBloodRequests() {
+    try {
+        const requests = await fetchWithAuth('/api/blood-requests');
+        const container = document.getElementById('admin-blood-requests-list');
+        
+        if (requests.length === 0) {
+            container.innerHTML = '<p class="no-data">No blood donation requests found.</p>';
+            return;
+        }
+        
+        container.innerHTML = requests.map(request => `
+            <div class="admin-item">
+                <h4>${request.patient_name}</h4>
+                <p><strong>Hospital:</strong> ${request.hospital_name}</p>
+                <p><strong>Blood Group:</strong> ${request.required_blood_group}</p>
+                <p><strong>Units Required:</strong> ${request.units_required}</p>
+                <p><strong>Urgency:</strong> ${request.urgency_level}</p>
+                <p><strong>Contact:</strong> ${request.contact_person} (${request.contact_number})</p>
+                <button class="delete-btn" onclick="deleteBloodRequest(${request.id})">
+                    <i class="fas fa-trash"></i> Delete
+                </button>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading blood requests for admin:', error);
+        showError('Failed to load blood donation requests');
+    }
+}
+
+async function loadAdminFundraising() {
+    try {
+        const campaigns = await fetchWithAuth('/api/fundraising');
+        const container = document.getElementById('admin-fundraising-list');
+        
+        if (campaigns.length === 0) {
+            container.innerHTML = '<p class="no-data">No fundraising campaigns found.</p>';
+            return;
+        }
+        
+        container.innerHTML = campaigns.map(campaign => `
+            <div class="admin-item">
+                <h4>${campaign.title}</h4>
+                <p><strong>Category:</strong> ${campaign.category}</p>
+                <p><strong>Goal:</strong> ₹${campaign.goal_amount.toLocaleString()}</p>
+                <p><strong>Raised:</strong> ₹${campaign.current_amount.toLocaleString()}</p>
+                <p><strong>Duration:</strong> ${new Date(campaign.start_date).toLocaleDateString()} - ${new Date(campaign.end_date).toLocaleDateString()}</p>
+                <button class="delete-btn" onclick="deleteFundraisingCampaign(${campaign.id})">
+                    <i class="fas fa-trash"></i> Delete
+                </button>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading fundraising campaigns for admin:', error);
+        showError('Failed to load fundraising campaigns');
+    }
+}
+
+async function loadAdminItemDonations() {
+    try {
+        const campaigns = await fetchWithAuth('/api/item-campaigns');
+        const container = document.getElementById('admin-item-donations-list');
+        
+        if (campaigns.length === 0) {
+            container.innerHTML = '<p class="no-data">No item donation campaigns found.</p>';
+            return;
+        }
+        
+        container.innerHTML = campaigns.map(campaign => `
+            <div class="admin-item">
+                <h4>${campaign.title}</h4>
+                <p><strong>Category:</strong> ${campaign.category}</p>
+                <p><strong>Location:</strong> ${campaign.location}</p>
+                <p><strong>Duration:</strong> ${new Date(campaign.start_date).toLocaleDateString()} - ${new Date(campaign.end_date).toLocaleDateString()}</p>
+                <button class="delete-btn" onclick="deleteItemCampaign(${campaign.id})">
+                    <i class="fas fa-trash"></i> Delete
+                </button>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading item donation campaigns for admin:', error);
+        showError('Failed to load item donation campaigns');
+    }
+}
+
+// Delete functions
+async function deleteBloodCamp(id) {
+    if (!confirm('Are you sure you want to delete this blood donation camp? This action cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        await fetchWithAuth(`/api/blood-camps/${id}`, {
+            method: 'DELETE'
+        });
+        
+        showError('Blood donation camp deleted successfully', 'success');
+        loadAdminBloodCamps();
+        loadBloodCamps(); // Refresh the main view
+    } catch (error) {
+        console.error('Error deleting blood camp:', error);
+        showError('Failed to delete blood donation camp');
+    }
+}
+
+async function deleteBloodRequest(id) {
+    if (!confirm('Are you sure you want to delete this blood donation request? This action cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        await fetchWithAuth(`/api/blood-requests/${id}`, {
+            method: 'DELETE'
+        });
+        
+        showError('Blood donation request deleted successfully', 'success');
+        loadAdminBloodRequests();
+        loadBloodRequests(); // Refresh the main view
+    } catch (error) {
+        console.error('Error deleting blood request:', error);
+        showError('Failed to delete blood donation request');
+    }
+}
+
+async function deleteFundraisingCampaign(id) {
+    if (!confirm('Are you sure you want to delete this fundraising campaign? This action cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        await fetchWithAuth(`/api/fundraising/${id}`, {
+            method: 'DELETE'
+        });
+        
+        showError('Fundraising campaign deleted successfully', 'success');
+        loadAdminFundraising();
+        loadFundraisingCampaigns(); // Refresh the main view
+    } catch (error) {
+        console.error('Error deleting fundraising campaign:', error);
+        showError('Failed to delete fundraising campaign');
+    }
+}
+
+async function deleteItemCampaign(id) {
+    if (!confirm('Are you sure you want to delete this item donation campaign? This action cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        await fetchWithAuth(`/api/item-campaigns/${id}`, {
+            method: 'DELETE'
+        });
+        
+        showError('Item donation campaign deleted successfully', 'success');
+        loadAdminItemDonations();
+        loadItemDonations(); // Refresh the main view
+    } catch (error) {
+        console.error('Error deleting item campaign:', error);
+        showError('Failed to delete item donation campaign');
+    }
+}
+  
