@@ -113,19 +113,6 @@ The application uses the following main tables:
 - Email: admin@donation.com
 - Password: admin123
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- National Service Scheme (NSS) IIT Patna
-- All contributors and supporters of the project
-
 ## Contact
 
 For any queries or support, please contact:
